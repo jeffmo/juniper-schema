@@ -14,33 +14,15 @@ pub struct SchemaData<'doc_ast> {
         graphql_parser::schema::ObjectType<'doc_ast, String>,
     >,
     pub schema_def: graphql_parser::schema::SchemaDefinition<'doc_ast, String>,
-    //schema_doc: graphql_parser::schema::Document<'doc_ast, String>,
-
-    // Types
-    // TODO: Ideally these would be refs back into the AST nodes that came out of the
-    //       SchemaVisitor, but unfortunately the interface of SchemaVisitor isn't very friendly to
-    //       specifying ref lifetimes...so we're stuck with cloning nodes during visitation.
-    /*
-    enum_types: Vec<graphql_parser::schema::EnumType<'static, String>>,
-    obj_types: Vec<graphql_parser::schema::ObjectType<'static, String>>,
-    schema_type: Option<graphql_parser::schema::SchemaDefinition<'static, String>>,
-    */
 }
 impl<'doc_ast> SchemaData<'doc_ast> {
-    pub fn parse(schema_src: String, context_type: ContextType) -> Result<Self, CodegenError> {
-        // TODO: Delete this workaround if we're still not using SchemaVisitor anymore
-        //
-        // Sadly, graphql_tools::SchemaVisitor hard-codes the lifetime of the toplevel Document as
-        // 'static -- and since the document holds a ref to the sourcecode, that means the lifetime
-        // of our sourcecode also needs to be 'static :(
-        //
-        // To work around this, we Box::leak() to generate a 'static lifetimed chunk of sourcode.
-        // this should be ok since this memory will only stick around for the macro-expansion phase
-        // of compilation.
-        let static_lifetime_schema_src = Box::leak(schema_src.into_boxed_str());
-
+    /**
+     * Pretty much just parses the schema source text using graphql_parser then grabs relevant
+     * nodes out of the syntax tree and stores then in a useful structure.
+     */
+    pub fn parse(schema_src: &'doc_ast str, context_type: ContextType) -> Result<Self, CodegenError> {
         let graphql_schema_doc: graphql_parser::schema::Document<'doc_ast, String> =
-            match graphql_parser::parse_schema(static_lifetime_schema_src) {
+            match graphql_parser::parse_schema(schema_src) {
                 Ok(doc) => doc,
                 Err(e) => return Err(CodegenError::SchemaParseError(e)),
             };

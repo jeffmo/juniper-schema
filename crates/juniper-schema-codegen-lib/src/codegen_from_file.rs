@@ -58,7 +58,7 @@ impl syn::parse::Parse for CodegenFromFile {
 impl CodegenFromFile {
     pub fn codegen(self) -> Result<proc_macro2::TokenStream, CodegenError> {
         let schema_str = std::fs::read_to_string(&self.schema_path).map_err(CodegenError::IoError)?;
-        let _schema_data = SchemaData::parse(schema_str, self.context_type);
+        let _schema_data = SchemaData::parse(schema_str.as_str(), self.context_type);
 
         Ok(quote::quote! { println!("Here is where the codegen goes") })
     }

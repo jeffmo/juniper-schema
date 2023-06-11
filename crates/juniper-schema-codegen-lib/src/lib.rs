@@ -33,7 +33,4 @@ pub enum CodegenError {
     },
     NoSchemaDefinitionFound,
     SchemaParseError(graphql_parser::schema::ParseError),
-
-
-    // !! TODO
 }
