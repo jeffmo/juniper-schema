@@ -1,12 +1,10 @@
-// TODO: Move this whole module into a separate juniper-schema-codegen-macro-libs crate
-
 use std::collections::HashMap;
 
-use super::CodegenError;
-use super::ContextType;
+use crate::CodegenError;
+use crate::ContextType;
 
-pub struct SchemaParser<'doc_ast> {
-    pub(crate) context_type: ContextType,
+pub struct SchemaData<'doc_ast> {
+    pub context_type: ContextType,
     pub enum_types: HashMap<
         String,
         graphql_parser::schema::EnumType<'doc_ast, String>
@@ -28,8 +26,8 @@ pub struct SchemaParser<'doc_ast> {
     schema_type: Option<graphql_parser::schema::SchemaDefinition<'static, String>>,
     */
 }
-impl<'doc_ast> SchemaParser<'doc_ast> {
-    pub(crate) fn new(schema_src: String, context_type: ContextType) -> Result<Self, CodegenError> {
+impl<'doc_ast> SchemaData<'doc_ast> {
+    pub fn parse(schema_src: String, context_type: ContextType) -> Result<Self, CodegenError> {
         // TODO: Delete this workaround if we're still not using SchemaVisitor anymore
         //
         // Sadly, graphql_tools::SchemaVisitor hard-codes the lifetime of the toplevel Document as
@@ -121,7 +119,7 @@ impl<'doc_ast> SchemaParser<'doc_ast> {
             None => return Err(CodegenError::NoSchemaDefinitionFound),
         };
 
-        Ok(SchemaParser {
+        Ok(SchemaData {
             context_type,
             enum_types,
             obj_types,

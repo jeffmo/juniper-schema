@@ -47,11 +47,12 @@ dependencies = [
 name = "juniper-schema-codegen"
 version = "0.1.0"
 dependencies = [
- "juniper-schema-codegen-macros",
+ "juniper-schema-codegen-lib",
+ "syn",
 ]
 
 [[package]]
-name = "juniper-schema-codegen-macros"
+name = "juniper-schema-codegen-lib"
 version = "0.1.0"
 dependencies = [
  "graphql-parser",

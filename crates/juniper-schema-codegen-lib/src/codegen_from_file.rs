@@ -1,61 +1,10 @@
-// TODO: Needed for stuff in schema_parser.rs.
-//       Move to juniper-schema-codegen-macro-libs when that move happens
-#![feature(map_try_insert)]
-
-mod schema_parser;
-
 use std::path::PathBuf;
 
-#[proc_macro]
-pub fn from_file(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let schema_from_file = match syn::parse::<CodegenFromFile>(input) {
-        Ok(s) => s,
-        Err(e) => return e.to_compile_error().into(),
-    };
+use crate::CodegenError;
+use crate::ContextType;
+use crate::schema_data::SchemaData;
 
-    match schema_from_file.codegen() {
-        Ok(tokens) => tokens.into(),
-        Err(e) => panic!("{:?}", e), // TODO: Switch to `compile_error!()`
-    }
-}
-
-// TODO: Move this into a separate juniper-schema-codegen-macro-libs crate
-pub(crate) enum ContextType {
-    Global(syn::LitStr),
-    // TODO: It can be useful to specify a different context type for each GraphQL type. At some
-    //       point we could allow this with some type of mapping syntax for the context arg.
-}
-impl ContextType {
-    pub fn new(input: &mut syn::parse::ParseStream) -> syn::Result<Self> {
-        Ok(ContextType::Global(input.parse::<syn::LitStr>()?))
-    }
-}
-
-// TODO: Move this into a separate juniper-schema-codegen-macro-libs crate
-#[derive(Debug)]
-pub(crate) enum CodegenError {
-    IoError(std::io::Error),
-    MultipleEnumTypeDefinitions {
-        first: graphql_parser::Pos,
-        second: graphql_parser::Pos,
-    },
-    MultipleObjectTypeDefinitions {
-        first: graphql_parser::Pos,
-        second: graphql_parser::Pos,
-    },
-    MultipleSchemaDefinitions {
-        first: graphql_parser::Pos,
-        second: graphql_parser::Pos,
-    },
-    NoSchemaDefinitionFound,
-    SchemaParseError(graphql_parser::schema::ParseError),
-
-
-    // !! TODO
-}
-
-// TODO: Move this into a separate juniper-schema-codegen-macro-libs crate
-struct CodegenFromFile {
+pub struct CodegenFromFile {
     context_type: ContextType,
     schema_path: PathBuf,
 }
@@ -107,11 +56,9 @@ impl syn::parse::Parse for CodegenFromFile {
     }
 }
 impl CodegenFromFile {
-    fn codegen(self) -> Result<proc_macro2::TokenStream, CodegenError> {
+    pub fn codegen(self) -> Result<proc_macro2::TokenStream, CodegenError> {
         let schema_str = std::fs::read_to_string(&self.schema_path).map_err(CodegenError::IoError)?;
-        let _codegen_data = schema_parser::SchemaParser::new(schema_str, self.context_type);
-
-        // TODO: Visit document and gather all needed info
+        let _schema_data = SchemaData::parse(schema_str, self.context_type);
 
         Ok(quote::quote! { println!("Here is where the codegen goes") })
     }

@@ -3,10 +3,21 @@ name = "juniper-schema-codegen"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+proc-macro = true
+
 [workspace]
 members = [
-    "crates/juniper-schema-codegen-macros",
+    "crates/juniper-schema-codegen-lib",
+#    "crates/juniper-schema-codegen-macros",
 ]
 
+[workspace.dependencies]
+graphql-parser = "0.4.0"
+proc-macro2 = "1.0.60"
+quote = "1.0.28"
+syn = "2.0.18"
+
 [dependencies]
-juniper-schema-codegen-macros = { path = "crates/juniper-schema-codegen-macros" }
+juniper-schema-codegen-lib = { path = "crates/juniper-schema-codegen-lib" }
+syn.workspace = true
