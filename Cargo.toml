@@ -1,0 +1,12 @@
+[package]
+name = "juniper-schema-codegen"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = [
+    "crates/juniper-schema-codegen-macros",
+]
+
+[dependencies]
+juniper-schema-codegen-macros = { path = "crates/juniper-schema-codegen-macros" }
