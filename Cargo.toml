@@ -9,7 +9,7 @@ proc-macro = true
 [workspace]
 members = [
     "crates/juniper-schema-codegen-lib",
-#    "crates/juniper-schema-codegen-macros",
+    "crates/juniper-schema-codegen-playground",
 ]
 
 [workspace.dependencies]

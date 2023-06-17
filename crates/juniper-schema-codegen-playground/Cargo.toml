@@ -1,0 +1,9 @@
+[package]
+name = "juniper-schema-codegen-playground"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1.68"
+juniper = "0.15.11"
+juniper-schema-codegen = { path = "../.." }

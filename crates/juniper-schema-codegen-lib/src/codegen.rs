@@ -1,0 +1,310 @@
+use std::path::PathBuf;
+
+use crate::CodegenError;
+use crate::ContextType;
+use crate::schema_info::SchemaInfo;
+
+/**
+ * Parse syn::braced!() content for codegen options.
+ *
+ * e.g. The stuff between the braces in
+ *
+ *    juniper_schema_codegen::from_file!("schema.graphqls", {
+ *        <<<<stuff here>>>>
+ *    });
+ */
+pub struct CodegenOptions {
+    context_type: Option<ContextType>,
+}
+impl syn::parse::Parse for CodegenOptions {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut context_type = None::<ContextType>;
+
+        while !input.is_empty() {
+            let opt_key = input.parse::<syn::Ident>()?;
+            match opt_key.to_string().as_str() {
+                // TODO: Support specification of additional
+                "context_type" => {
+                    let _ = input.parse::<syn::Token![:]>()?;
+                    if let Some(_) = context_type {
+                        return Err(syn::parse::Error::new(
+                            opt_key.span(),
+                            "`context_type` specified more than once!",
+                        ));
+                    }
+                    let _ = context_type.insert(
+                        ContextType::Global(input.parse::<syn::Type>()?)
+                    );
+                },
+
+                other => {
+                    return Err(syn::parse::Error::new(
+                        opt_key.span(),
+                        format!("Unexpected option: `{}`", other),
+                    ));
+                }
+            }
+
+            if input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(CodegenOptions {
+            context_type,
+        })
+    }
+}
+impl Default for CodegenOptions {
+    fn default() -> Self {
+        CodegenOptions {
+            context_type: None,
+        }
+    }
+}
+
+/**
+ * Given a GraphQL schema string: Parse it as a GraphQL schema, extract
+ * information from the schema AST using SchemaInfo, and then produce a
+ * TokenStream for the codegen'd juniper traits to be implemented.
+ */
+pub struct Codegen {
+    schema_info: SchemaInfo<'static>,
+    options: CodegenOptions,
+}
+impl Codegen {
+    pub fn new(schema: String, options: CodegenOptions) -> Result<Self, CodegenError> {
+        let schema_info = SchemaInfo::parse(schema)?;
+        Ok(Codegen {
+            options,
+            schema_info,
+        })
+    }
+
+    pub fn to_tokens(self) -> Result<proc_macro2::TokenStream, CodegenError> {
+        let mut tokens = proc_macro2::TokenStream::new();
+
+        tokens.extend(quote::quote! {
+            use async_trait::async_trait;
+        });
+
+        tokens.extend(self.codegen_object_types()?);
+
+        Ok(tokens)
+    }
+
+    fn codegen_object_types(&self) -> Result<proc_macro2::TokenStream, CodegenError> {
+        let span = proc_macro2::Span::call_site();
+
+        let obj_impls = self.schema_info.obj_types.iter().map(|(obj_name, obj_type)| {
+            // TODO: Cleanse obj_names that clash with rust keywords somehow
+            //       e.g. Use `r#` "raw identifiers"? Detect and add some suffix?
+            let object_struct_ident = syn::Ident::new(
+                &obj_name,
+                span.clone()
+            );
+            let resolver_trait_name = syn::Ident::new(
+                format!("{}FieldResolvers", &obj_name).as_str(),
+                span.clone(),
+            );
+
+            let (impl_methods, trait_methods) = obj_type.fields.iter().fold(
+                (vec![], vec![]),
+                |(mut impl_methods, mut trait_methods), field| {
+                    let impl_method_name = syn::Ident::new(
+                        &field.name,
+                        span.clone(),
+                    );
+                    let resolver_method_name = syn::Ident::new(
+                        format!("resolve_{}", &field.name).as_str(),
+                        span.clone(),
+                    );
+
+                    let mut impl_method_params = vec![
+                        quote::quote! { &self },
+                    ];
+                    let mut trait_method_params = vec![
+                        // TODO: Add option for switching between &self vs &mut self
+                        quote::quote! { &self },
+                    ];
+                    let mut resolver_args = vec![];
+
+                    // If a context type is specified, use it
+                    match &self.options.context_type {
+                        Some(ContextType::Global(type_ident)) => {
+                            impl_method_params.push(quote::quote! {
+                                ctx: &#type_ident
+                            });
+                            trait_method_params.push(quote::quote! {
+                                ctx: &#type_ident
+                            });
+                            resolver_args.push(quote::quote! {
+                                ctx
+                            });
+                        }
+                        None => (),
+                    };
+
+                    // Map the GraphQL type to the Rust type
+                    let return_type = self.graphql_type_to_rust_type(
+                        &field.field_type,
+                        &span,
+                        /* nullable = */ true,
+                    );
+
+                    impl_methods.push(quote::quote! {
+                        pub async fn #impl_method_name(#(#impl_method_params),*) -> #return_type {
+                            // Delegate to resolver trait method
+                            self.#resolver_method_name(#(#resolver_args),*).await
+                        }
+                    });
+
+                    trait_methods.push(quote::quote! {
+                        async fn #resolver_method_name(#(#trait_method_params),*) -> #return_type;
+                    });
+
+                    (impl_methods, trait_methods)
+                },
+            );
+
+            let mut juniper_attr_macro_args = vec![];
+            if let Some(ContextType::Global(type_ident)) = &self.options.context_type {
+                juniper_attr_macro_args.push(quote::quote! {
+                    Context = #type_ident
+                });
+            }
+
+            quote::quote! {
+                #[async_trait]
+                pub trait #resolver_trait_name {
+                    #(#trait_methods)*
+                }
+
+                #[juniper::graphql_object(#(#juniper_attr_macro_args),*)]
+                impl #object_struct_ident {
+                    #(#impl_methods)*
+                }
+
+                // TODO: Use a syn::Ident with a span that's not accessible
+                //      instead of __trait_assert__
+                impl #object_struct_ident {
+                    fn __trait_assert__(self) -> impl #resolver_trait_name {
+                        self
+                    }
+                }
+            }
+        });
+
+        Ok(quote::quote! {
+            #(#obj_impls)*
+        })
+    }
+
+    fn graphql_type_to_rust_type(
+        &self,
+        field_type: &graphql_parser::query::Type<'static, String>,
+        span: &proc_macro2::Span,
+        nullable: bool,
+    ) -> proc_macro2::TokenStream {
+        use graphql_parser::query::Type;
+        match field_type {
+            Type::NamedType(name) => {
+                let ident = match name.as_str() {
+                    "Int" => quote::quote! { i32 },
+                    "Float" => quote::quote! { f64 },
+                    "String" => quote::quote! { String },
+                    "Boolean" => quote::quote! { bool },
+                    "ID" => quote::quote! { juniper::ID },
+                    name => {
+                        let ident = syn::Ident::new(name, span.clone());
+                        quote::quote! { #ident }
+                    },
+                };
+
+                if nullable {
+                    quote::quote!{ Option<#ident> }
+                } else {
+                    quote::quote!{ #ident }
+                }
+            },
+
+            Type::ListType(inner_type) => {
+                let inner_type_tokens = self.graphql_type_to_rust_type(
+                    inner_type,
+                    span,
+                    /* nullable = */ true,
+                );
+                if nullable {
+                    quote::quote! { Option<Vec<#inner_type_tokens>> }
+                } else {
+                    quote::quote! { Vec<#inner_type_tokens> }
+                }
+            },
+
+            Type::NonNullType(inner_type) => {
+                self.graphql_type_to_rust_type(
+                    inner_type,
+                    span,
+                    /* nullable = */ false,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Parse contents of the `juniper_schema_codegen::from_file!()` macro, read the
+ * contents of the schema file, and produce a Codegen object from it.
+ */
+pub struct CodegenFromFile {
+    options: CodegenOptions,
+    schema_path: PathBuf,
+    schema_path_span: proc_macro2::Span,
+}
+impl syn::parse::Parse for CodegenFromFile {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<CodegenFromFile> {
+        let schema_path_litstr = input.parse::<syn::LitStr>()?;
+
+       let mut codegen_opts = None::<CodegenOptions>;
+        if !input.is_empty() {
+            input.parse::<syn::Token![,]>()?;
+
+            if !input.is_empty() {
+                // Parse braces and insert tokens from inside the braces into
+                // `option_tokens`
+                let option_tokens;
+                syn::braced!(option_tokens in input);
+
+                let _ = codegen_opts.insert(option_tokens.parse::<CodegenOptions>()?);
+            }
+        }
+
+        Ok(CodegenFromFile::new(schema_path_litstr, codegen_opts.unwrap_or_default()))
+    }
+}
+impl CodegenFromFile {
+    pub fn new(schema_path_litstr: syn::LitStr, options: CodegenOptions) -> Self {
+        let schema_relative_path = &schema_path_litstr.value();
+        let crate_dir = std::env::var("CARGO_MANIFEST_DIR").expect(
+            "Env var `CARGO_MANIFEST_DIR` is missing."
+        );
+
+        let schema_path = PathBuf::from(crate_dir).join(schema_relative_path);
+        let schema_path_span = schema_path_litstr.span();
+
+        CodegenFromFile {
+            options,
+            schema_path,
+            schema_path_span,
+        }
+    }
+
+    pub fn to_codegen(self) -> Result<Codegen, CodegenError> {
+        let schema_str = std::fs::read_to_string(&self.schema_path).map_err(|e| {
+            CodegenError::IoError(e, self.schema_path_span)
+        })?;
+        Codegen::new(schema_str, self.options)
+    }
+}

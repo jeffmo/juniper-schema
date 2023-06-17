@@ -1,24 +1,21 @@
 #![feature(map_try_insert)]
 
-mod codegen_from_file;
-pub mod schema_data;
+pub mod codegen;
+//pub mod impl_to_trait_mapper;
+pub mod schema_info;
 
-pub use codegen_from_file::CodegenFromFile;
+pub use codegen::CodegenFromFile;
+//pub use impl_to_trait_mapper::ImplToTraitMapper;
 
 pub enum ContextType {
-    Global(syn::LitStr),
+    Global(syn::Type),
     // TODO: It can be useful to specify a different context type for each GraphQL type. At some
     //       point we could allow this with some type of mapping syntax for the context arg.
-}
-impl ContextType {
-    pub fn new(input: &mut syn::parse::ParseStream) -> syn::Result<Self> {
-        Ok(ContextType::Global(input.parse::<syn::LitStr>()?))
-    }
 }
 
 #[derive(Debug)]
 pub enum CodegenError {
-    IoError(std::io::Error),
+    IoError(std::io::Error, proc_macro2::Span),
     MultipleEnumTypeDefinitions {
         first: graphql_parser::Pos,
         second: graphql_parser::Pos,
@@ -33,4 +30,20 @@ pub enum CodegenError {
     },
     NoSchemaDefinitionFound,
     SchemaParseError(graphql_parser::schema::ParseError),
+}
+impl CodegenError {
+    pub fn to_compile_error(&self) -> proc_macro2::TokenStream {
+        let (error, error_span) = match self {
+            _other => {
+                let err = format!("Error generating code for GraphQL schema: {:?}", self);
+                let span = proc_macro2::Span::call_site();
+                (err, span)
+            }
+        };
+
+        let error_strlit = syn::LitStr::new(error.as_str(), error_span);
+        quote::quote! {
+            compile_error!(#error_strlit)
+        }
+    }
 }

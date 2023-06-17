@@ -1,41 +1,51 @@
 use std::collections::HashMap;
 
 use crate::CodegenError;
-use crate::ContextType;
 
-pub struct SchemaData<'doc_ast> {
-    pub context_type: ContextType,
+pub struct SchemaInfo<'a> {
     pub enum_types: HashMap<
         String,
-        graphql_parser::schema::EnumType<'doc_ast, String>
+        graphql_parser::schema::EnumType<'a, String>
     >,
     pub obj_types: HashMap<
         String,
-        graphql_parser::schema::ObjectType<'doc_ast, String>,
+        graphql_parser::schema::ObjectType<'a, String>,
     >,
-    pub schema_def: graphql_parser::schema::SchemaDefinition<'doc_ast, String>,
+    pub schema_def: graphql_parser::schema::SchemaDefinition<'a, String>,
 }
-impl<'doc_ast> SchemaData<'doc_ast> {
+impl<'a> SchemaInfo<'a> {
     /**
-     * Pretty much just parses the schema source text using graphql_parser then grabs relevant
-     * nodes out of the syntax tree and stores then in a useful structure.
+     * Pretty much just parses the schema source text using graphql_parser then
+     * grabs relevant nodes out of the syntax tree and stores then in a useful
+     * structure.
      */
-    pub fn parse(schema_src: &'doc_ast str, context_type: ContextType) -> Result<Self, CodegenError> {
-        let graphql_schema_doc: graphql_parser::schema::Document<'doc_ast, String> =
-            match graphql_parser::parse_schema(schema_src) {
+    pub fn parse(
+        //schema_src: &'a str,
+        schema_str: String,
+    ) -> Result<Self, CodegenError> {
+        // graphql_parser::parse_schema() annoyingly takes a &str...which means someone has to own
+        // the actual source text and keep it alive for the lifetime of this struct :(
+        //
+        // Rather than drill lifetime params all the way through our codegen abstractions, we'll
+        // just "leak" the source string here to give it 'static lifetime. This should be ok since
+        // this stuff runs at compile time...so the "leak" only lasts as long as the macro
+        // expansion.
+        let schema_str_leaked = Box::leak(schema_str.into_boxed_str());
+        let graphql_schema_doc: graphql_parser::schema::Document<'a, String> =
+            match graphql_parser::parse_schema(schema_str_leaked) {
                 Ok(doc) => doc,
                 Err(e) => return Err(CodegenError::SchemaParseError(e)),
             };
 
         let mut enum_types: HashMap<
             String,
-            graphql_parser::schema::EnumType<'doc_ast, String>
+            graphql_parser::schema::EnumType<'a, String>
         > = HashMap::new();
         let mut obj_types: HashMap<
             String,
-            graphql_parser::schema::ObjectType<'doc_ast, String>
+            graphql_parser::schema::ObjectType<'a, String>
         > = HashMap::new();
-        let mut schema_def = None::<graphql_parser::schema::SchemaDefinition<'doc_ast, String>>;
+        let mut schema_def = None::<graphql_parser::schema::SchemaDefinition<'a, String>>;
 
         for def in graphql_schema_doc.definitions {
             use graphql_parser::schema;
@@ -101,8 +111,7 @@ impl<'doc_ast> SchemaData<'doc_ast> {
             None => return Err(CodegenError::NoSchemaDefinitionFound),
         };
 
-        Ok(SchemaData {
-            context_type,
+        Ok(SchemaInfo {
             enum_types,
             obj_types,
             schema_def,
