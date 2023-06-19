@@ -30,20 +30,23 @@ pub enum CodegenError {
     },
     NoSchemaDefinitionFound,
     SchemaParseError(graphql_parser::schema::ParseError),
+    UndefinedGraphQLType(String),
 }
 impl CodegenError {
     pub fn to_compile_error(&self) -> proc_macro2::TokenStream {
-        let (error, error_span) = match self {
+        let default_span = proc_macro2::Span::call_site();
+        let error_strlit = match self {
+            CodegenError::UndefinedGraphQLType(msg) => {
+                syn::LitStr::new(msg.as_str(), default_span)
+            },
             _other => {
                 let err = format!("Error generating code for GraphQL schema: {:?}", self);
-                let span = proc_macro2::Span::call_site();
-                (err, span)
+                syn::LitStr::new(err.as_str(), default_span)
             }
         };
 
-        let error_strlit = syn::LitStr::new(error.as_str(), error_span);
         quote::quote! {
-            compile_error!(#error_strlit)
+            compile_error!(#error_strlit);
         }
     }
 }

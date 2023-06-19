@@ -1,68 +1,17 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::CodegenError;
 use crate::ContextType;
 use crate::schema_info::SchemaInfo;
 
-/**
- * Parse syn::braced!() content for codegen options.
- *
- * e.g. The stuff between the braces in
- *
- *    juniper_schema_codegen::from_file!("schema.graphqls", {
- *        <<<<stuff here>>>>
- *    });
- */
-pub struct CodegenOptions {
-    context_type: Option<ContextType>,
+enum MapperToken {
+    FatArrow,
+    SkinnyArrow,
 }
-impl syn::parse::Parse for CodegenOptions {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut context_type = None::<ContextType>;
 
-        while !input.is_empty() {
-            let opt_key = input.parse::<syn::Ident>()?;
-            match opt_key.to_string().as_str() {
-                // TODO: Support specification of additional
-                "context_type" => {
-                    let _ = input.parse::<syn::Token![:]>()?;
-                    if let Some(_) = context_type {
-                        return Err(syn::parse::Error::new(
-                            opt_key.span(),
-                            "`context_type` specified more than once!",
-                        ));
-                    }
-                    let _ = context_type.insert(
-                        ContextType::Global(input.parse::<syn::Type>()?)
-                    );
-                },
-
-                other => {
-                    return Err(syn::parse::Error::new(
-                        opt_key.span(),
-                        format!("Unexpected option: `{}`", other),
-                    ));
-                }
-            }
-
-            if input.peek(syn::Token![,]) {
-                input.parse::<syn::Token![,]>()?;
-            } else {
-                break;
-            }
-        }
-
-        Ok(CodegenOptions {
-            context_type,
-        })
-    }
-}
-impl Default for CodegenOptions {
-    fn default() -> Self {
-        CodegenOptions {
-            context_type: None,
-        }
-    }
+pub enum CodegenOptionsValidationError {
+    UnexpectedGraphQLTypeInGraphQLToRustTypeMap(String),
 }
 
 /**
@@ -76,23 +25,10 @@ pub struct Codegen {
 }
 impl Codegen {
     pub fn new(schema: String, options: CodegenOptions) -> Result<Self, CodegenError> {
-        let schema_info = SchemaInfo::parse(schema)?;
         Ok(Codegen {
             options,
-            schema_info,
-        })
-    }
-
-    pub fn to_tokens(self) -> Result<proc_macro2::TokenStream, CodegenError> {
-        let mut tokens = proc_macro2::TokenStream::new();
-
-        tokens.extend(quote::quote! {
-            use async_trait::async_trait;
-        });
-
-        tokens.extend(self.codegen_object_types()?);
-
-        Ok(tokens)
+            schema_info: SchemaInfo::parse(schema)?,
+        }.validate_options()?)
     }
 
     fn codegen_object_types(&self) -> Result<proc_macro2::TokenStream, CodegenError> {
@@ -102,7 +38,7 @@ impl Codegen {
             // TODO: Cleanse obj_names that clash with rust keywords somehow
             //       e.g. Use `r#` "raw identifiers"? Detect and add some suffix?
             let object_struct_ident = syn::Ident::new(
-                &obj_name,
+                self.graphql_type_name_to_rust_type_name(obj_name.to_string()).as_str(),
                 span.clone()
             );
             let resolver_trait_name = syn::Ident::new(
@@ -217,8 +153,12 @@ impl Codegen {
                     "String" => quote::quote! { String },
                     "Boolean" => quote::quote! { bool },
                     "ID" => quote::quote! { juniper::ID },
-                    name => {
-                        let ident = syn::Ident::new(name, span.clone());
+                    graphql_type_name => {
+                        let graphql_type_name = String::from(graphql_type_name);
+                        let rust_type_name = self.graphql_type_name_to_rust_type_name(
+                            String::from(graphql_type_name)
+                        );
+                        let ident = syn::Ident::new(rust_type_name.as_str(), span.clone());
                         quote::quote! { #ident }
                     },
                 };
@@ -250,6 +190,162 @@ impl Codegen {
                     /* nullable = */ false,
                 )
             }
+        }
+    }
+
+    fn graphql_type_name_to_rust_type_name(&self, graphql_name: String) -> String {
+        if let Some(type_map) = &self.options.graphql_to_rust_type_map {
+            type_map.get(&graphql_name).unwrap_or(&graphql_name).to_string()
+        } else {
+            graphql_name
+        }
+    }
+
+    pub fn to_tokens(self) -> Result<proc_macro2::TokenStream, CodegenError> {
+        let mut tokens = proc_macro2::TokenStream::new();
+
+        tokens.extend(quote::quote! {
+            use async_trait::async_trait;
+        });
+
+        tokens.extend(self.codegen_object_types()?);
+
+        Ok(tokens)
+    }
+
+    fn validate_options(self) -> Result<Self, CodegenError> {
+        // All entries in graphql_to_rust_type_map should map to an actual type
+        // specified in the schema
+        if let Some(graphql_to_rust_type_map) = &self.options.graphql_to_rust_type_map {
+            for (graphql_type_name, rust_type_name) in graphql_to_rust_type_map.iter() {
+                if self.schema_info.enum_types.contains_key(graphql_type_name) {
+                    continue;
+                }
+
+                if self.schema_info.obj_types.contains_key(graphql_type_name) {
+                    continue;
+                }
+
+                return Err(CodegenError::UndefinedGraphQLType(format!(
+                    "Error mapping GraphQLType(`{}`) -> RustType(`{}`): `{}` \
+                    is not a type defined in your GraphQL schema.",
+                    &graphql_type_name,
+                    rust_type_name,
+                    graphql_type_name,
+                )));
+            }
+        }
+
+        Ok(self)
+    }
+}
+
+/**
+ * Parse syn::braced!() content for codegen options.
+ *
+ * e.g. The stuff between the braces in
+ *
+ *    juniper_schema_codegen::from_file!("schema.graphqls", {
+ *        <<<<stuff here>>>>
+ *    });
+ */
+pub struct CodegenOptions {
+    context_type: Option<ContextType>,
+    graphql_to_rust_type_map: Option<HashMap<String, String>>,
+}
+impl syn::parse::Parse for CodegenOptions {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut context_type = None::<ContextType>;
+        let mut graphql_to_rust_type_map = HashMap::new();
+
+        // Don't have an opinion on which arrow is used for arrow syntax except
+        // that the same arrow is used consistently. Helps when you can't
+        // remember which arrow is expected...it's whichever one you try first.
+        let mut mapping_arrow_token = None::<MapperToken>;
+        while !input.is_empty() {
+            let opt_key = input.parse::<syn::Ident>()?;
+            match opt_key.to_string().as_str() {
+                "context_type" => {
+                    let _ = input.parse::<syn::Token![:]>()?;
+                    if let Some(_) = context_type {
+                        return Err(syn::parse::Error::new(
+                            opt_key.span(),
+                            "`context_type` specified more than once!",
+                        ));
+                    }
+                    let _ = context_type.insert(
+                        ContextType::Global(input.parse::<syn::Type>()?)
+                    );
+                },
+
+                "graphql_to_rust_type_map" => {
+                    let _ = input.parse::<syn::Token![:]>()?;
+
+                    let graphql_to_rust_mappers;
+                    syn::braced!(graphql_to_rust_mappers in input);
+
+                    while !graphql_to_rust_mappers.is_empty() {
+                        let graphql_type_name_ident = graphql_to_rust_mappers.parse::<syn::Ident>()?;
+                        match mapping_arrow_token {
+                            Some(MapperToken::SkinnyArrow) => {
+                                graphql_to_rust_mappers.parse::<syn::Token![->]>()?;
+                            },
+                            Some(MapperToken::FatArrow) => {
+                                graphql_to_rust_mappers.parse::<syn::Token![=>]>()?;
+                            },
+                            None => {
+                                if graphql_to_rust_mappers.peek(syn::Token![->]) {
+                                    let _ = mapping_arrow_token.insert(MapperToken::SkinnyArrow);
+                                    graphql_to_rust_mappers.parse::<syn::Token![->]>()?;
+                                } else {
+                                    let _ = mapping_arrow_token.insert(MapperToken::FatArrow);
+                                    graphql_to_rust_mappers.parse::<syn::Token![=>]>()?;
+                                }
+                            }
+                        };
+                        let rust_type_name_ident = graphql_to_rust_mappers.parse::<syn::Ident>()?;
+                        let _ = graphql_to_rust_type_map.insert(
+                            graphql_type_name_ident.to_string(),
+                            rust_type_name_ident.to_string(),
+                        );
+
+                        if graphql_to_rust_mappers.peek(syn::Token![,]) {
+                            graphql_to_rust_mappers.parse::<syn::Token![,]>()?;
+                        }
+                    }
+                },
+
+                other => {
+                    return Err(syn::parse::Error::new(
+                        opt_key.span(),
+                        format!("Unexpected option: `{}`", other),
+                    ));
+                }
+            }
+
+            if input.peek(syn::Token![,]) {
+                input.parse::<syn::Token![,]>()?;
+            }
+        }
+
+        let graphql_to_rust_type_map =
+            if graphql_to_rust_type_map.len() > 0 {
+                Some(graphql_to_rust_type_map)
+            } else {
+                None
+            };
+
+        Ok(CodegenOptions {
+            context_type,
+            graphql_to_rust_type_map,
+        })
+    }
+}
+impl Default for CodegenOptions {
+    fn default() -> Self {
+        CodegenOptions {
+            context_type: None,
+            graphql_to_rust_type_map: None,
         }
     }
 }
