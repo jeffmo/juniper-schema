@@ -1,5 +1,5 @@
-use juniper_schema_codegen_lib::CodegenFromFile;
-//use juniper_schema_codegen_lib::ImplToTraitMapper;
+use juniper_schema_lib::CodegenFromFile;
+//use juniper_schema_lib::ImplToTraitMapper;
 
 #[proc_macro]
 pub fn from_file(input: proc_macro::TokenStream) -> proc_macro::TokenStream {

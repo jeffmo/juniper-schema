@@ -245,7 +245,7 @@ impl Codegen {
  *
  * e.g. The stuff between the braces in
  *
- *    juniper_schema_codegen::from_file!("schema.graphqls", {
+ *    juniper_schema::from_file!("schema.graphqls", {
  *        <<<<stuff here>>>>
  *    });
  */
@@ -351,7 +351,7 @@ impl Default for CodegenOptions {
 }
 
 /**
- * Parse contents of the `juniper_schema_codegen::from_file!()` macro, read the
+ * Parse contents of the `juniper_schema::from_file!()` macro, read the
  * contents of the schema file, and produce a Codegen object from it.
  */
 pub struct CodegenFromFile {

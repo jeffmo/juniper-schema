@@ -1,5 +1,5 @@
 [package]
-name = "juniper-schema-codegen-lib"
+name = "juniper-schema-lib"
 version = "0.1.0"
 edition = "2021"
 

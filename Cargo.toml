@@ -1,5 +1,5 @@
 [package]
-name = "juniper-schema-codegen"
+name = "juniper-schema"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,8 +8,8 @@ proc-macro = true
 
 [workspace]
 members = [
-    "crates/juniper-schema-codegen-lib",
-    "crates/juniper-schema-codegen-playground",
+    "crates/juniper-schema-lib",
+    "crates/juniper-schema-playground",
 ]
 
 [workspace.dependencies]
@@ -19,5 +19,5 @@ quote = "1.0.28"
 syn = "2.0.18"
 
 [dependencies]
-juniper-schema-codegen-lib = { path = "crates/juniper-schema-codegen-lib" }
+juniper-schema-lib = { path = "crates/juniper-schema-lib" }
 syn.workspace = true
