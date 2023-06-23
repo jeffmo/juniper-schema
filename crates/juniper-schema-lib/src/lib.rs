@@ -1,11 +1,13 @@
 #![feature(map_try_insert)]
 
 pub mod codegen;
-//pub mod impl_to_trait_mapper;
+pub mod codegen2;
+pub mod codegen3;
 pub mod schema_info;
 
 pub use codegen::CodegenFromFile;
-//pub use impl_to_trait_mapper::ImplToTraitMapper;
+pub use codegen2::SchemaFromFile2;
+pub use codegen3::SchemaFromFile3;
 
 pub enum ContextType {
     Global(syn::Type),
@@ -28,6 +30,7 @@ pub enum CodegenError {
         first: graphql_parser::Pos,
         second: graphql_parser::Pos,
     },
+    NoQueryDefinitionFound,
     NoSchemaDefinitionFound,
     SchemaParseError(graphql_parser::schema::ParseError),
     UndefinedGraphQLType(String),

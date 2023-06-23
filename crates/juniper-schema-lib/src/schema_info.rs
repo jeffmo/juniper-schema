@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::CodegenError;
 
@@ -106,15 +107,14 @@ impl<'a> SchemaInfo<'a> {
             }
         }
 
-        let schema_def = match schema_def {
-            Some(def) => def,
-            None => return Err(CodegenError::NoSchemaDefinitionFound),
-        };
-
-        Ok(SchemaInfo {
-            enum_types,
-            obj_types,
-            schema_def,
-        })
+        if let Some(schema_def) = schema_def {
+            Ok(SchemaInfo {
+                enum_types,
+                obj_types,
+                schema_def,
+            })
+        } else {
+            Err(CodegenError::NoSchemaDefinitionFound)
+        }
     }
 }

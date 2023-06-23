@@ -250,7 +250,7 @@ impl Codegen {
  *    });
  */
 pub struct CodegenOptions {
-    context_type: Option<ContextType>,
+    pub context_type: Option<ContextType>,
     graphql_to_rust_type_map: Option<HashMap<String, String>>,
 }
 impl syn::parse::Parse for CodegenOptions {
@@ -346,6 +346,41 @@ impl Default for CodegenOptions {
         CodegenOptions {
             context_type: None,
             graphql_to_rust_type_map: None,
+        }
+    }
+}
+impl CodegenOptions {
+    pub fn validate(&self, schema_info: &SchemaInfo) -> Result<(), CodegenError> {
+        // All entries in graphql_to_rust_type_map should map to an actual type
+        // specified in the schema
+        if let Some(graphql_to_rust_type_map) = &self.graphql_to_rust_type_map {
+            for (graphql_type_name, rust_type_name) in graphql_to_rust_type_map.iter() {
+                if schema_info.enum_types.contains_key(graphql_type_name) {
+                    continue;
+                }
+
+                if schema_info.obj_types.contains_key(graphql_type_name) {
+                    continue;
+                }
+
+                return Err(CodegenError::UndefinedGraphQLType(format!(
+                    "Error mapping GraphQLType(`{}`) -> RustType(`{}`): `{}` \
+                    is not a type defined in your GraphQL schema.",
+                    &graphql_type_name,
+                    rust_type_name,
+                    graphql_type_name,
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn graphql_type_name_to_rust_type_name(&self, graphql_name: &String) -> String {
+        if let Some(type_map) = &self.graphql_to_rust_type_map {
+            type_map.get(graphql_name).unwrap_or(graphql_name).to_string()
+        } else {
+            graphql_name.to_string()
         }
     }
 }
